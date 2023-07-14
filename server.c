@@ -7,34 +7,44 @@
 #include <unistd.h>
 #include "server.h"
 
-#define MAX_REQUEST_SIZE 2048
-#define RESPONSE_TEMPLATE "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: %d\r\n\r\n%s"
-
-void handle_request(int client_sock, char *request)
+void handle_request(int client_sock, char *request, IOCContainer *container)
 {
     // Determine the HTTP method
     char *method = strtok(request, " ");
 
-    if (strcmp(method, "GET") == 0)
+    // Determine the URL path
+    char *path = strtok(NULL, " ");
+    if (path == NULL)
     {
-        handle_get_request(client_sock, request);
+        // Invalid request, no URL path
+        const char *response = "<html><body><h1>Invalid Request</h1></body></html>";
+        int response_length = strlen(response);
+
+        char *http_response = (char *)malloc(MAX_REQUEST_SIZE);
+        snprintf(http_response, MAX_REQUEST_SIZE, RESPONSE_TEMPLATE, response_length, response);
+
+        send(client_sock, http_response, strlen(http_response), 0);
+        free(http_response);
+        return;
     }
-    else if (strcmp(method, "PATCH") == 0)
+
+    // Find a matching route
+    int i;
+    int route_found = 0;
+    for (i = 0; i < container->num_routes; i++)
     {
-        handle_patch_request(client_sock, request);
+        if (strcmp(path, container->routes[i].path) == 0 && strcmp(method, container->routes[i].method) == 0)
+        {
+            container->routes[i].handler(client_sock, request);
+            route_found = 1;
+            break;
+        }
     }
-    else if (strcmp(method, "POST") == 0)
+
+    if (!route_found)
     {
-        handle_post_request(client_sock, request);
-    }
-    else if (strcmp(method, "DELETE") == 0)
-    {
-        handle_delete_request(client_sock, request);
-    }
-    else
-    {
-        // Unsupported method
-        const char *response = "<html><body><h1>Unsupported Method</h1></body></html>";
+        // Route not found
+        const char *response = "<html><body><h1>Route Not Found</h1></body></html>";
         int response_length = strlen(response);
 
         char *http_response = (char *)malloc(MAX_REQUEST_SIZE);
@@ -45,65 +55,13 @@ void handle_request(int client_sock, char *request)
     }
 }
 
-void handle_get_request(int client_sock, char *request)
-{
-    // Logic for handling GET request
-    const char *response = "<html><body><h1>GET Request</h1></body></html>";
-    int response_length = strlen(response);
-
-    char *http_response = (char *)malloc(MAX_REQUEST_SIZE);
-    snprintf(http_response, MAX_REQUEST_SIZE, RESPONSE_TEMPLATE, response_length, response);
-
-    send(client_sock, http_response, strlen(http_response), 0);
-    free(http_response);
-}
-
-void handle_patch_request(int client_sock, char *request)
-{
-    // Logic for handling PATCH request
-    const char *response = "<html><body><h1>PATCH Request</h1></body></html>";
-    int response_length = strlen(response);
-
-    char *http_response = (char *)malloc(MAX_REQUEST_SIZE);
-    snprintf(http_response, MAX_REQUEST_SIZE, RESPONSE_TEMPLATE, response_length, response);
-
-    send(client_sock, http_response, strlen(http_response), 0);
-    free(http_response);
-}
-
-void handle_post_request(int client_sock, char *request)
-{
-    // Logic for handling POST request
-    const char *response = "<html><body><h1>POST Request</h1></body></html>";
-    int response_length = strlen(response);
-
-    char *http_response = (char *)malloc(MAX_REQUEST_SIZE);
-    snprintf(http_response, MAX_REQUEST_SIZE, RESPONSE_TEMPLATE, response_length, response);
-
-    send(client_sock, http_response, strlen(http_response), 0);
-    free(http_response);
-}
-
-void handle_delete_request(int client_sock, char *request)
-{
-    // Logic for handling DELETE request
-    const char *response = "<html><body><h1>DELETE Request</h1></body></html>";
-    int response_length = strlen(response);
-
-    char *http_response = (char *)malloc(MAX_REQUEST_SIZE);
-    snprintf(http_response, MAX_REQUEST_SIZE, RESPONSE_TEMPLATE, response_length, response);
-
-    send(client_sock, http_response, strlen(http_response), 0);
-    free(http_response);
-}
-
 void server_init(Server *server, int port)
 {
     server->socket_fd = -1;
     server->port = port;
 }
 
-void server_start(Server *server)
+void server_start(Server *server, IOCContainer *container)
 {
     int server_sock, client_sock;
     struct sockaddr_in server_addr, client_addr;
@@ -161,7 +119,7 @@ void server_start(Server *server)
         request[request_size] = '\0';
 
         // Handle the request and send the response
-        handle_request(client_sock, request);
+        handle_request(client_sock, request, container);
 
         // Close the client connection
         close(client_sock);
@@ -169,4 +127,27 @@ void server_start(Server *server)
 
     // Close the server socket
     close(server_sock);
+}
+
+void add_route(IOCContainer *container, const char *path, HttpMethod method, void (*handler)(int client_sock, const char *request))
+{
+    if (container->num_routes >= 10)
+    {
+        printf("Route table full. Cannot add more routes.\n");
+        return;
+    }
+
+    container->routes[container->num_routes].path = path;
+    container->routes[container->num_routes].method = method;
+    container->routes[container->num_routes].handler = handler;
+    container->num_routes++;
+}
+
+IOCContainer *create_ioc_container()
+{
+    IOCContainer *container = (IOCContainer *)malloc(sizeof(IOCContainer));
+    container->routes = (Route *)malloc(sizeof(Route) * 10); // Maximum 10 routes, adjust as needed
+    container->num_routes = 0;
+
+    return container;
 }
